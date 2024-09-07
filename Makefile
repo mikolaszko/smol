@@ -1,2 +1,2 @@
 smol: smol.c
-	$(CC) smol.c -o smol -Wall -Wextra -pedantic -std=99
+	$(CC) smol.c -o smol -Wall -Wextra -pedantic -std=c99
