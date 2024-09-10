@@ -14,6 +14,7 @@
 
 // data
 struct editorConfig {
+  int cx, cy;
   int screenrows;
   int screencols;
   struct termios orig_termios;
@@ -182,6 +183,7 @@ void editorDrawRows(struct abuf *ab) {
     }
   }
 }
+
 // accumulate all of the tildres and escape chars into buf and then write to it
 void editorRefreshScreen() {
   struct abuf ab = ABUF_INIT;
@@ -192,7 +194,11 @@ void editorRefreshScreen() {
 
   editorDrawRows(&ab);
 
-  abAppend(&ab, "\x1b[H", 3);
+  char buf[32];
+  // terminal is 1 based so we need to add + 1 to cursor coords
+  snprintf(buf, sizeof(buf), "\x1b[%d;%dH", E.cy + 1, E.cx + 1);
+  abAppend(&ab, buf, strlen(buf));
+
   // hide cursor
   abAppend(&ab, "\x1b[?25h", 6);
 
@@ -201,13 +207,42 @@ void editorRefreshScreen() {
 }
 
 // input
+void editorMoveCursor(char key) {
+  switch (key) {
+  case 'h':
+    E.cx--;
+    break;
+  case 'l':
+    E.cx++;
+    break;
+  case 'k':
+    E.cy--;
+    break;
+  case 'j':
+    E.cy++;
+    break;
+  }
+}
 void editorProcessKeypress() {
   char c = editorReadKey();
   editorProcessCommand(c);
+
+  switch (c) {
+  case 'j':
+  case 'h':
+  case 'k':
+  case 'l':
+    editorMoveCursor(c);
+    break;
+    //
+  }
 }
 
 // init
 void initEditor() {
+  E.cx = 0;
+  E.cy = 0;
+
   if (getWindowSize(&E.screenrows, &E.screencols) == -1)
     die("getWindowSize");
 }
