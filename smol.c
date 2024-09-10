@@ -12,6 +12,7 @@
 #define SMOL_VERSION "0.0.1"
 #define CTRL_KEY(k) ((k) & 0x1f)
 
+enum mode { V = 86, I = 73, N = 78 };
 // data
 struct editorConfig {
   int cx, cy;
@@ -19,6 +20,7 @@ struct editorConfig {
   int screencols;
   struct termios orig_termios;
   char command;
+  enum mode mode;
 };
 struct editorConfig E;
 
@@ -149,8 +151,8 @@ void editorDrawRows(struct abuf *ab) {
   int y;
   for (y = 0; y < E.screenrows; y++) {
     if (y == E.screenrows / 3) {
-      char welcome[50];
-      char desc[50];
+      char welcome[80];
+      char desc[80];
       int welcomelen = snprintf(welcome, sizeof(welcome),
                                 "Smol editor -- version %s", SMOL_VERSION);
       int desclen = snprintf(desc, sizeof(desc), "Simple, Fast AF, Nvim-like");
@@ -168,6 +170,7 @@ void editorDrawRows(struct abuf *ab) {
       while (padding--)
         abAppend(ab, " ", 1);
       abAppend(ab, welcome, welcomelen);
+
       padding = ((E.screencols - welcomelen) / 2) + 1;
       abAppend(ab, "\n", 1);
       while (padding--)
@@ -178,8 +181,23 @@ void editorDrawRows(struct abuf *ab) {
     }
 
     abAppend(ab, "\x1b[K", 3);
+
     if (y < E.screenrows - 1) {
       abAppend(ab, "\r\n", 2);
+    } else {
+      char space[120];
+      // terminal is 1 based so we need to add + 1 to cursor coords
+      // X, Y
+      int spacelen = snprintf(space, sizeof(space), "\x1b[%d;%dH", E.screenrows,
+                              E.screencols - 10);
+      abAppend(ab, space, spacelen);
+
+      char mode[80];
+      int modelen = snprintf(mode, sizeof(mode), "Mode: %c", E.mode);
+      if (modelen > E.screencols) {
+        modelen = E.screencols;
+      }
+      abAppend(ab, mode, modelen);
     }
   }
 }
@@ -228,18 +246,36 @@ void editorProcessKeypress() {
   editorProcessCommand(c);
 
   switch (c) {
+  case '\x1b':
+    if (E.mode != N) {
+      E.mode = N;
+    }
+    break;
   case 'j':
   case 'h':
   case 'k':
   case 'l':
-    editorMoveCursor(c);
+    if (E.mode == N) {
+      editorMoveCursor(c);
+    }
     break;
-    //
+  //
+  case 'i':
+    if (E.mode != I) {
+      E.mode = I;
+    }
+    break;
+  case 'n':
+    if (E.mode != N) {
+      E.mode = N;
+    }
+    break;
   }
 }
 
 // init
 void initEditor() {
+  E.mode = N;
   E.cx = 0;
   E.cy = 0;
 
