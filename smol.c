@@ -19,6 +19,7 @@ struct editorConfig {
   int screenrows;
   int screencols;
   struct termios orig_termios;
+  char command_seq[3];
   char command;
   enum mode mode;
 };
@@ -134,18 +135,6 @@ void abAppend(struct abuf *ab, const char *s, int len) {
 
 void abFree(struct abuf *ab) { free(ab->b); }
 
-// commands
-void editorProcessCommand(char c) {
-  // :q command for now quiting
-  if (E.command == ':' && c == 'q') {
-    write(STDOUT_FILENO, "\x1b[2J", 4);
-    write(STDOUT_FILENO, "\x1b[H", 3);
-    exit(0);
-  } else {
-    E.command = c;
-  }
-}
-
 // output
 void editorDrawRows(struct abuf *ab) {
   int y;
@@ -228,19 +217,57 @@ void editorRefreshScreen() {
 void editorMoveCursor(char key) {
   switch (key) {
   case 'h':
-    E.cx--;
+    if (E.cx != 0)
+      E.cx--;
     break;
   case 'l':
-    E.cx++;
+    if (E.cx != E.screencols - 1)
+      E.cx++;
     break;
   case 'k':
-    E.cy--;
+    if (E.cy != 0)
+      E.cy--;
     break;
   case 'j':
-    E.cy++;
+    if (E.cy != E.screenrows - 1)
+      E.cy++;
     break;
   }
 }
+// input but commands
+void editorProcessCommand(char c) {
+  if (E.mode == I) {
+    return;
+  }
+
+  // move to the bottom
+  if (c == 'G') {
+    int times = E.screenrows;
+    while (times--) {
+      editorMoveCursor('j');
+    }
+    return;
+  }
+
+  // move up the doc
+  if (E.command == 'g' && c == 'g') {
+    int times = E.screenrows;
+    while (times--) {
+      editorMoveCursor('k');
+    }
+    return;
+  }
+
+  // quit
+  if (E.command == ':' && c == 'q') {
+    write(STDOUT_FILENO, "\x1b[2J", 4);
+    write(STDOUT_FILENO, "\x1b[H", 3);
+    exit(0);
+  }
+
+  E.command = c;
+}
+
 void editorProcessKeypress() {
   char c = editorReadKey();
   editorProcessCommand(c);
