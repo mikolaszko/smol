@@ -1,4 +1,9 @@
 // includes
+//
+#define _DEFAULT_SOURCE
+#define _BSD_SOURCE
+#define _GNU_SOURCE
+
 #include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -12,12 +17,20 @@
 #define SMOL_VERSION "0.0.1"
 #define CTRL_KEY(k) ((k) & 0x1f)
 
-enum mode { V = 86, I = 73, N = 78 };
 // data
+typedef struct erow {
+  int size;
+  char *chars;
+} erow;
+
+enum mode { V = 86, I = 73, N = 78 };
+
 struct editorConfig {
   int cx, cy;
   int screenrows;
   int screencols;
+  int numrows;
+  erow *row;
   struct termios orig_termios;
   char command_seq[3];
   char command;
@@ -113,6 +126,37 @@ int getWindowSize(int *rows, int *cols) {
   }
 }
 
+// row operations
+void editorAppendRow(char *s, size_t len) {
+  E.row = realloc(E.row, sizeof(erow) * (E.numrows + 1));
+
+  int at = E.numrows;
+  E.row[at].size = len;
+  E.row[at].chars = malloc(len + 1);
+  memcpy(E.row[at].chars, s, len);
+  E.row[at].chars[len] = '\0';
+  E.numrows++;
+}
+
+// file i/o
+
+void editorOpen(char *filename) {
+  FILE *fp = fopen(filename, "r");
+  if (!fp)
+    die("fopen");
+  char *line = NULL;
+  size_t linecap = 0;
+  ssize_t linelen = 13;
+  while ((linelen = getline(&line, &linecap, fp)) != -1) {
+    while (linelen > 0 &&
+           (line[linelen - 1] == '\n' || line[linelen - 1] == '\r'))
+      linelen--;
+    editorAppendRow(line, linelen);
+  }
+  free(line);
+  fclose(fp);
+}
+
 // append buffer
 struct abuf {
   char *b;
@@ -139,34 +183,43 @@ void abFree(struct abuf *ab) { free(ab->b); }
 void editorDrawRows(struct abuf *ab) {
   int y;
   for (y = 0; y < E.screenrows; y++) {
-    if (y == E.screenrows / 3) {
-      char welcome[80];
-      char desc[80];
-      int welcomelen = snprintf(welcome, sizeof(welcome),
-                                "Smol editor -- version %s", SMOL_VERSION);
-      int desclen = snprintf(desc, sizeof(desc), "Simple, Fast AF, Nvim-like");
-      if (welcomelen > E.screencols)
-        welcomelen = E.screencols;
-      if (desclen > E.screencols)
-        desclen = E.screencols;
+    if (y >= E.numrows) {
+      if (E.numrows == 0 && y == E.screenrows / 3) {
 
-      int padding = (E.screencols - welcomelen) / 2;
-      if (padding) {
+        char welcome[80];
+        char desc[80];
+        int welcomelen = snprintf(welcome, sizeof(welcome),
+                                  "Smol editor -- version %s", SMOL_VERSION);
+        int desclen =
+            snprintf(desc, sizeof(desc), "Simple, Fast AF, Nvim-like");
+        if (welcomelen > E.screencols)
+          welcomelen = E.screencols;
+        if (desclen > E.screencols)
+          desclen = E.screencols;
+
+        int padding = (E.screencols - welcomelen) / 2;
+        if (padding) {
+          abAppend(ab, "~", 1);
+          padding--;
+        }
+
+        while (padding--)
+          abAppend(ab, " ", 1);
+        abAppend(ab, welcome, welcomelen);
+
+        padding = ((E.screencols - welcomelen) / 2) + 1;
+        abAppend(ab, "\n", 1);
+        while (padding--)
+          abAppend(ab, " ", 1);
+        abAppend(ab, desc, desclen);
+      } else {
         abAppend(ab, "~", 1);
-        padding--;
       }
-
-      while (padding--)
-        abAppend(ab, " ", 1);
-      abAppend(ab, welcome, welcomelen);
-
-      padding = ((E.screencols - welcomelen) / 2) + 1;
-      abAppend(ab, "\n", 1);
-      while (padding--)
-        abAppend(ab, " ", 1);
-      abAppend(ab, desc, desclen);
     } else {
-      abAppend(ab, "~", 1);
+      int len = E.row[y].size;
+      if (len > E.screencols)
+        len = E.screencols;
+      abAppend(ab, E.row[y].chars, len);
     }
 
     abAppend(ab, "\x1b[K", 3);
@@ -175,7 +228,6 @@ void editorDrawRows(struct abuf *ab) {
       abAppend(ab, "\r\n", 2);
     } else {
       char space[120];
-      // terminal is 1 based so we need to add + 1 to cursor coords
       // X, Y
       int spacelen = snprintf(space, sizeof(space), "\x1b[%d;%dH", E.screenrows,
                               E.screencols - 10);
@@ -305,13 +357,20 @@ void initEditor() {
   E.mode = N;
   E.cx = 0;
   E.cy = 0;
+  E.numrows = 0;
+  E.row = NULL;
 
   if (getWindowSize(&E.screenrows, &E.screencols) == -1)
     die("getWindowSize");
 }
-int main() {
+
+int main(int argc, char *argv[]) {
   enableRawMode();
   initEditor();
+  if (argc >= 2) {
+    editorOpen(argv[1]);
+  }
+
   while (1) {
     editorRefreshScreen();
     editorProcessKeypress();
