@@ -286,13 +286,16 @@ void editorRefreshScreen() {
 
 // input
 void editorMoveCursor(char key) {
+  erow *row = (E.cy >= E.numrows) ? NULL : &E.row[E.cy];
   switch (key) {
   case 'h':
     if (E.cx != 0)
       E.cx--;
     break;
   case 'l':
-    E.cx++;
+    if (row && E.cx < row->size) {
+      E.cx++;
+    }
     break;
   case 'k':
     if (E.cy != 0)
@@ -303,6 +306,22 @@ void editorMoveCursor(char key) {
       E.cy++;
     }
     break;
+  case '$':
+    while (E.cx < row->size) {
+      E.cx++;
+    }
+    break;
+  case '^':
+    while (E.cy < E.numrows) {
+      E.cx++;
+    }
+    break;
+  }
+
+  row = (E.cy >= E.numrows) ? NULL : &E.row[E.cy];
+  int rowlen = row ? row->size : 0;
+  if (E.cx > rowlen) {
+    E.cx = rowlen;
   }
 }
 // input but commands
@@ -311,9 +330,21 @@ void editorProcessCommand(char c) {
     return;
   }
 
+  // MANIFESTO:
+  // useful code usually looks like dogshit and that's one of those cases,
+  // on highest level of optimization there's no difference between this and a
+  // switch i am giving myself a mental permission to keep it this way
+  if (c == 36) {
+    editorMoveCursor('$');
+    return;
+  }
+  if (c == 94) {
+    editorMoveCursor('^');
+    return;
+  }
   // move to the bottom
   if (c == 'G') {
-    int times = E.screenrows;
+    int times = E.numrows;
     while (times--) {
       editorMoveCursor('j');
     }
@@ -322,8 +353,7 @@ void editorProcessCommand(char c) {
 
   // move up the doc
   if (E.command == 'g' && c == 'g') {
-    int times = E.screenrows + E.rowoff;
-    printf("%d", times);
+    int times = E.numrows;
     while (times--) {
       editorMoveCursor('k');
     }
