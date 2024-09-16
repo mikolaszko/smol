@@ -312,8 +312,8 @@ void editorMoveCursor(char key) {
     }
     break;
   case '^':
-    while (E.cy < E.numrows) {
-      E.cx++;
+    while (E.cx != 0) {
+      E.cx--;
     }
     break;
   }
