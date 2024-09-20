@@ -302,15 +302,21 @@ void editorDrawStatusBar(struct abuf *ab) {
   char *grayish = "\x1b[48;5;240m";
   abAppend(ab, grayish, strlen(grayish));
 
-  char mode[100];
+  char mode[100], rstatus[80];
   int len = snprintf(mode, sizeof(mode), "   Mode: %c | %.20s - %d lines",
                      E.mode, E.filename ? E.filename : "[No Name]", E.numrows);
+  int rlen = snprintf(rstatus, sizeof(rstatus), "%d/%d", E.cy + 1, E.numrows);
   if (len > E.screencols)
     len = E.screencols;
   abAppend(ab, mode, len);
   while (len < E.screencols) {
-    abAppend(ab, " ", 1);
-    len++;
+    if (E.screencols - len == rlen) {
+      abAppend(ab, rstatus, rlen);
+      break;
+    } else {
+      abAppend(ab, " ", 1);
+      len++;
+    }
   }
   abAppend(ab, "\x1b[m", 3);
 }
@@ -471,11 +477,13 @@ void initEditor() {
   E.numrows = 0;
   E.row = NULL;
   E.filename = NULL;
+  E.statusms[0] = '\0';
+  E.statusmsg_time = 0;
 
   if (getWindowSize(&E.screenrows, &E.screencols) == -1)
     die("getWindowSize");
 
-  E.screenrows -= 1;
+  E.screenrows -= 2;
 }
 
 int main(int argc, char *argv[]) {
