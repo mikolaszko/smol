@@ -5,6 +5,7 @@
 #define _GNU_SOURCE
 
 #include <errno.h>
+#include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -221,6 +222,26 @@ void editorInsertChar(int c) {
 }
 
 // file i/o
+char *editorRowsToString(int *buflen) {
+  int totlen = 0;
+  int j;
+  for (j = 0; j < E.numrows; j++) {
+    totlen += E.row[j].size + 1;
+  }
+  *buflen = totlen;
+
+  char *buf = malloc(totlen);
+  char *p = buf;
+  for (j = 0; j < E.numrows; j++) {
+    memcpy(p, E.row[j].chars, E.row[j].size);
+    p += E.row[j].size;
+    *p = '\n';
+    p++;
+  }
+
+  return buf;
+}
+
 void editorOpen(char *filename) {
   free(E.filename);
   E.filename = strdup(filename);
@@ -238,6 +259,27 @@ void editorOpen(char *filename) {
   }
   free(line);
   fclose(fp);
+}
+
+void editorSave() {
+  if (E.filename == NULL)
+    return;
+  int len;
+  char *buf = editorRowsToString(&len);
+
+  int fd = open(E.filename, O_RDWR | O_CREAT, 0644);
+  if (fd != -1) {
+    if (ftruncate(fd, len) != -1) {
+      if (write(fd, buf, len) == len) {
+        close(fd);
+        free(buf);
+        return;
+      }
+    }
+    close(fd);
+  }
+
+  free(buf);
 }
 
 // append buffer
@@ -464,6 +506,10 @@ void editorProcessCommand(char c) {
     exit(0);
   }
 
+  if (E.command == ':' && c == 'w') {
+    editorSave();
+  }
+
   E.command = c;
 }
 
@@ -498,6 +544,7 @@ void editorProcessKeypress() {
   case 'i':
     if (E.mode != I) {
       E.mode = I;
+      break;
     }
     if (E.mode == I) {
       editorInsertChar(c);
@@ -535,7 +582,7 @@ void initEditor() {
   if (getWindowSize(&E.screenrows, &E.screencols) == -1)
     die("getWindowSize");
 
-  E.screenrows -= 2;
+  E.screenrows -= 1;
 }
 
 int main(int argc, char *argv[]) {
