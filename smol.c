@@ -17,6 +17,19 @@
 #define SMOL_TAB_STOP 2
 #define CTRL_KEY(k) ((k) & 0x1f)
 
+enum editorKey {
+  BACKSPACE = 127,
+  ARROW_LEFT = 1000,
+  ARROW_RIGHT,
+  ARROW_UP,
+  ARROW_DOWN,
+  DEL_KEY,
+  HOME_KEY,
+  END_KEY,
+  PAGE_UP,
+  PAGE_DOWN
+};
+
 // data
 typedef struct erow {
   char *chars;
@@ -187,8 +200,27 @@ void editorAppendRow(char *s, size_t len) {
   E.numrows++;
 }
 
-// file i/o
+void editorRowInsertChar(erow *row, int at, int c) {
+  if (at < 0 || at > row->size)
+    at = row->size;
+  row->chars = realloc(row->chars, row->size + 2);
+  memmove(&row->chars[at + 1], &row->chars[at], row->size - at + 1);
+  row->size++;
+  row->chars[at] = c;
+  editorUpdateRow(row);
+}
 
+// editor ops
+
+void editorInsertChar(int c) {
+  if (E.cy == E.numrows) {
+    editorAppendRow("", 0);
+  }
+  editorRowInsertChar(&E.row[E.cy], E.cx, c);
+  E.cx++;
+}
+
+// file i/o
 void editorOpen(char *filename) {
   free(E.filename);
   E.filename = strdup(filename);
@@ -392,7 +424,8 @@ void editorProcessCommand(char c) {
   // MANIFESTO:
   // useful code usually looks like dogshit and that's one of those cases,
   // on highest level of optimization there's no difference between this and a
-  // switch i am giving myself a mental permission to keep it this way
+  // switch. i am giving myself a mental permission to keep it this way
+  // also yeah TODO: make it into a switch stmt
   if (c == 36) {
     editorMoveCursor('$');
     return;
@@ -439,10 +472,16 @@ void editorProcessKeypress() {
   editorProcessCommand(c);
 
   switch (c) {
+  case '\r':
+    // TODO: impl
+    break;
   case '\x1b':
     if (E.mode != N) {
       E.mode = N;
     }
+    break;
+  case BACKSPACE:
+    // TODO: impl
     break;
   case 'j':
   case 'h':
@@ -451,18 +490,33 @@ void editorProcessKeypress() {
     if (E.mode == N) {
       editorMoveCursor(c);
     }
+    if (E.mode == I) {
+      editorInsertChar(c);
+    }
     break;
   //
   case 'i':
     if (E.mode != I) {
       E.mode = I;
     }
+    if (E.mode == I) {
+      editorInsertChar(c);
+      break;
+    }
     break;
   case 'n':
+    if (E.mode == I) {
+      editorInsertChar(c);
+      break;
+    }
     if (E.mode != N) {
       E.mode = N;
     }
     break;
+  default:
+    if (E.mode == I) {
+      editorInsertChar(c);
+    }
   }
 }
 
@@ -477,8 +531,6 @@ void initEditor() {
   E.numrows = 0;
   E.row = NULL;
   E.filename = NULL;
-  E.statusms[0] = '\0';
-  E.statusmsg_time = 0;
 
   if (getWindowSize(&E.screenrows, &E.screencols) == -1)
     die("getWindowSize");
