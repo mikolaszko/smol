@@ -1,22 +1,24 @@
 // includes
-//
 #define _DEFAULT_SOURCE
 #define _BSD_SOURCE
 #define _GNU_SOURCE
 
 #include <errno.h>
 #include <fcntl.h>
-#include <stdint.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/types.h>
 #include <termios.h>
+#include <time.h>
 #include <unistd.h>
 // defines
 #define SMOL_VERSION "0.0.1"
 #define SMOL_TAB_STOP 2
 #define CTRL_KEY(k) ((k) & 0x1f)
+#define SMOL_QUIT_TIMES 1
 
 enum editorKey {
   BACKSPACE = 127,
@@ -49,13 +51,19 @@ struct editorConfig {
   int screencols;
   int numrows;
   erow *row;
+  int dirty;
   struct termios orig_termios;
   char command_seq[3];
   char command;
   enum mode mode;
   char *filename;
+  char statusmsg[80];
+  time_t statusmsg_time;
 };
 struct editorConfig E;
+
+// prot
+void editorSetStatusMessage(const char *fmt, ...);
 
 // terminal
 void die(const char *s) {
@@ -199,6 +207,7 @@ void editorAppendRow(char *s, size_t len) {
   editorUpdateRow(&E.row[at]);
 
   E.numrows++;
+  E.dirty++;
 }
 
 void editorRowInsertChar(erow *row, int at, int c) {
@@ -209,6 +218,7 @@ void editorRowInsertChar(erow *row, int at, int c) {
   row->size++;
   row->chars[at] = c;
   editorUpdateRow(row);
+  E.dirty++;
 }
 
 // editor ops
@@ -259,6 +269,7 @@ void editorOpen(char *filename) {
   }
   free(line);
   fclose(fp);
+  E.dirty = 0;
 }
 
 void editorSave() {
@@ -273,6 +284,8 @@ void editorSave() {
       if (write(fd, buf, len) == len) {
         close(fd);
         free(buf);
+        editorSetStatusMessage("%d bytes written to disk", len);
+        E.dirty = 0;
         return;
       }
     }
@@ -280,6 +293,7 @@ void editorSave() {
   }
 
   free(buf);
+  editorSetStatusMessage("Can't save! I/O error: %s", strerror(errno));
 }
 
 // append buffer
@@ -377,8 +391,9 @@ void editorDrawStatusBar(struct abuf *ab) {
   abAppend(ab, grayish, strlen(grayish));
 
   char mode[100], rstatus[80];
-  int len = snprintf(mode, sizeof(mode), "   Mode: %c | %.20s - %d lines",
-                     E.mode, E.filename ? E.filename : "[No Name]", E.numrows);
+  int len = snprintf(mode, sizeof(mode), "   Mode: %c | %.20s - %d lines %s",
+                     E.mode, E.filename ? E.filename : "[No Name]", E.numrows,
+                     E.dirty ? "(modified)" : "");
   int rlen = snprintf(rstatus, sizeof(rstatus), "%d/%d", E.cy + 1, E.numrows);
   if (len > E.screencols)
     len = E.screencols;
@@ -395,6 +410,17 @@ void editorDrawStatusBar(struct abuf *ab) {
   abAppend(ab, "\x1b[m", 3);
 }
 
+void editorDrawMessageBar(struct abuf *ab) {
+  abAppend(ab, "\x1b[K", 3);
+  int msglen = strlen(E.statusmsg);
+  if (msglen > E.screencols)
+    msglen = E.screencols;
+  if (msglen && time(NULL) - E.statusmsg_time < 5)
+    abAppend(ab, E.statusmsg, msglen);
+
+  abAppend(ab, "\r\n", 2);
+}
+
 // accumulate all of the tildres and escape chars into buf and then write to it
 void editorRefreshScreen() {
   editorScroll();
@@ -405,6 +431,7 @@ void editorRefreshScreen() {
   abAppend(&ab, "\x1b[H", 3);
 
   editorDrawRows(&ab);
+  editorDrawMessageBar(&ab);
   editorDrawStatusBar(&ab);
 
   char buf[32];
@@ -417,6 +444,13 @@ void editorRefreshScreen() {
 
   write(STDOUT_FILENO, ab.b, ab.len);
   abFree(&ab);
+}
+void editorSetStatusMessage(const char *fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  vsnprintf(E.statusmsg, sizeof(E.statusmsg), fmt, ap);
+  va_end(ap);
+  E.statusmsg_time = time(NULL);
 }
 
 // input
@@ -459,6 +493,7 @@ void editorMoveCursor(char key) {
 }
 // input but commands
 void editorProcessCommand(char c) {
+  static int quit_times = SMOL_QUIT_TIMES;
   if (E.mode == I) {
     return;
   }
@@ -501,6 +536,13 @@ void editorProcessCommand(char c) {
 
   // quit
   if (E.command == ':' && c == 'q') {
+    if (E.dirty && quit_times > 0) {
+      editorSetStatusMessage(
+          "WARN! File has unsaved changes. Press :q %d more times to quit",
+          quit_times);
+      quit_times--;
+      return;
+    }
     write(STDOUT_FILENO, "\x1b[2J", 4);
     write(STDOUT_FILENO, "\x1b[H", 3);
     exit(0);
@@ -508,6 +550,9 @@ void editorProcessCommand(char c) {
 
   if (E.command == ':' && c == 'w') {
     editorSave();
+  }
+  if (c != ':') {
+    quit_times = SMOL_QUIT_TIMES;
   }
 
   E.command = c;
@@ -578,11 +623,14 @@ void initEditor() {
   E.numrows = 0;
   E.row = NULL;
   E.filename = NULL;
+  E.dirty = 0;
+  E.statusmsg[0] = '\0';
+  E.statusmsg_time = 0;
 
   if (getWindowSize(&E.screenrows, &E.screencols) == -1)
     die("getWindowSize");
 
-  E.screenrows -= 1;
+  E.screenrows -= 2;
 }
 
 int main(int argc, char *argv[]) {
