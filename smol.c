@@ -193,10 +193,12 @@ void editorUpdateRow(erow *row) {
   row->render[idx] = '\0';
   row->rsize = idx;
 }
-void editorAppendRow(char *s, size_t len) {
+void editorInsertRow(int at, char *s, size_t len) {
+  if (at < 0 || at > E.numrows)
+    return;
   E.row = realloc(E.row, sizeof(erow) * (E.numrows + 1));
+  memmove(&E.row[at + 1], &E.row[at], sizeof(erow) * (E.numrows - at));
 
-  int at = E.numrows;
   E.row[at].size = len;
   E.row[at].chars = malloc(len + 1);
   memcpy(E.row[at].chars, s, len);
@@ -210,6 +212,30 @@ void editorAppendRow(char *s, size_t len) {
   E.dirty++;
 }
 
+void editorFreeRow(erow *row) {
+  free(row->render);
+  free(row->chars);
+}
+
+void editorDelRow(int at) {
+  if (at < 0 || at >= E.numrows)
+    return;
+  editorFreeRow(&E.row[at]);
+  memmove(&E.row[at], &E.row[at + 1], sizeof(erow) * (E.numrows - at - 1));
+  E.numrows--;
+  E.dirty++;
+}
+
+void editorRowAppendString(erow *row, char *s, size_t len) {
+  row->chars = realloc(row->chars, row->size + len + 1);
+  memcpy(&row->chars[row->size], s, len);
+  row->size += len;
+  row->chars[row->size] = '\n';
+  editorUpdateRow(row);
+  E.dirty++;
+}
+
+// editor operations
 void editorRowInsertChar(erow *row, int at, int c) {
   if (at < 0 || at > row->size)
     at = row->size;
@@ -221,14 +247,58 @@ void editorRowInsertChar(erow *row, int at, int c) {
   E.dirty++;
 }
 
+void editorRowDelChar(erow *row, int at) {
+  if (at < 0 || at >= row->size)
+    return;
+  memmove(&row->chars[at], &row->chars[at + 1], row->size - at);
+  row->size--;
+  editorUpdateRow(row);
+  E.dirty++;
+}
+
+void editorDelChar() {
+  if (E.cy == E.numrows)
+    return;
+  if (E.cx == 0 && E.cy == 0)
+    return;
+  erow *row = &E.row[E.cy];
+  if (E.cx > 0) {
+    editorRowDelChar(row, E.cx - 1);
+    E.cx--;
+  } else {
+    E.cx = E.row[E.cy - 1].size;
+    editorRowAppendString(&E.row[E.cy - 1], row->chars, row->size);
+    editorDelRow(E.cy);
+    E.cy--;
+  }
+}
+
 // editor ops
 
 void editorInsertChar(int c) {
   if (E.cy == E.numrows) {
-    editorAppendRow("", 0);
+    editorInsertRow(E.numrows, "", 0);
   }
   editorRowInsertChar(&E.row[E.cy], E.cx, c);
   E.cx++;
+}
+
+void editorInsertNewline(char c) {
+  if (E.cx == 0) {
+    editorInsertRow(E.cy + 1, "", 0);
+  }
+  if (c == '\r') {
+    erow *row = &E.row[E.cy];
+    editorInsertRow(E.cy + 1, &row->chars[E.cx], row->size - E.cx);
+    row = &E.row[E.cy];
+    row->size = E.cx;
+    row->chars[row->size] = '\0';
+    editorUpdateRow(row);
+  } else {
+    editorInsertRow(E.cy + 1, "", 0);
+  }
+  E.cy++;
+  E.cx = 0;
 }
 
 // file i/o
@@ -265,7 +335,7 @@ void editorOpen(char *filename) {
     while (linelen > 0 &&
            (line[linelen - 1] == '\n' || line[linelen - 1] == '\r'))
       linelen--;
-    editorAppendRow(line, linelen);
+    editorInsertRow(E.numrows, line, linelen);
   }
   free(line);
   fclose(fp);
@@ -498,59 +568,81 @@ void editorProcessCommand(char c) {
     return;
   }
 
+  int times = 0;
   // MANIFESTO:
-  // useful code usually looks like dogshit and that's one of those cases,
-  // on highest level of optimization there's no difference between this and a
-  // switch. i am giving myself a mental permission to keep it this way
-  // also yeah TODO: make it into a switch stmt
-  if (c == 36) {
+  // ugly but very useful and simple
+  //
+  switch (c) {
+  case '$':
     editorMoveCursor('$');
     return;
-  }
-  if (c == 94) {
+  case '^':
     editorMoveCursor('^');
     return;
-  }
-  // move to the bottom
-  if (c == 'G') {
+  case 'G':
     E.cy = E.rowoff;
-    int times = E.numrows;
+    times = E.numrows;
     while (times--) {
       editorMoveCursor('j');
     }
     return;
-  }
+  case 'g':
+    if (E.command == 'g') {
+      E.cy = E.rowoff + E.screenrows - 1;
+      if (E.cy > E.numrows)
+        E.cy = E.numrows;
 
-  // move up the doc
-  if (E.command == 'g' && c == 'g') {
-    E.cy = E.rowoff + E.screenrows - 1;
-    if (E.cy > E.numrows)
-      E.cy = E.numrows;
-
-    int times = E.numrows;
-    while (times--) {
-      editorMoveCursor('k');
-    }
-    return;
-  }
-
-  // quit
-  if (E.command == ':' && c == 'q') {
-    if (E.dirty && quit_times > 0) {
-      editorSetStatusMessage(
-          "WARN! File has unsaved changes. Press :q %d more times to quit",
-          quit_times);
-      quit_times--;
+      times = E.numrows;
+      while (times--) {
+        editorMoveCursor('k');
+      }
       return;
     }
-    write(STDOUT_FILENO, "\x1b[2J", 4);
-    write(STDOUT_FILENO, "\x1b[H", 3);
-    exit(0);
+    break;
+  case 'd':
+    if (E.command == 'd') {
+      editorDelRow(E.cy);
+    }
+    break;
+  case 'q':
+    if (E.command == ':') {
+      if (E.dirty && quit_times > 0) {
+        editorSetStatusMessage(
+            "WARN! File has unsaved changes. Press :q %d more times to quit",
+            quit_times);
+        quit_times--;
+        return;
+      }
+      write(STDOUT_FILENO, "\x1b[2J", 4);
+      write(STDOUT_FILENO, "\x1b[H", 3);
+      exit(0);
+      return;
+    }
+    break;
+  case 'b':
+    if (E.mode == I) {
+      return;
+    }
+    times = 10;
+    while (times--) {
+      editorMoveCursor('h');
+    }
+    break;
+  case 'w':
+    if (E.mode == I) {
+      return;
+    }
+    if (E.command == ':') {
+      editorSave();
+    } else {
+      times = 10;
+      while (times--) {
+        editorMoveCursor('l');
+      }
+    }
+    break;
   }
 
-  if (E.command == ':' && c == 'w') {
-    editorSave();
-  }
   if (c != ':') {
     quit_times = SMOL_QUIT_TIMES;
   }
@@ -564,7 +656,7 @@ void editorProcessKeypress() {
 
   switch (c) {
   case '\r':
-    // TODO: impl
+    editorInsertNewline('\r');
     break;
   case '\x1b':
     if (E.mode != N) {
@@ -572,7 +664,12 @@ void editorProcessKeypress() {
     }
     break;
   case BACKSPACE:
-    // TODO: impl
+    if (E.mode == I) {
+      editorDelChar();
+    }
+    break;
+  case 'o':
+    editorInsertNewline('o');
     break;
   case 'j':
   case 'h':
