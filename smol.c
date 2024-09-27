@@ -3,6 +3,7 @@
 #define _BSD_SOURCE
 #define _GNU_SOURCE
 
+#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdarg.h>
@@ -64,6 +65,8 @@ struct editorConfig E;
 
 // prot
 void editorSetStatusMessage(const char *fmt, ...);
+void editorRefreshScreen();
+char *editorPrompt(char *prompt);
 
 // terminal
 void die(const char *s) {
@@ -323,11 +326,17 @@ char *editorRowsToString(int *buflen) {
 }
 
 void editorOpen(char *filename) {
+  E.dirty = 0;
   free(E.filename);
-  E.filename = strdup(filename);
+  printf("%s", filename);
+  size_t fnlen = strlen(filename) + 1;
+  E.filename = malloc(fnlen);
+  memcpy(E.filename, filename, fnlen);
   FILE *fp = fopen(filename, "r");
+
   if (!fp)
     die("fopen");
+
   char *line = NULL;
   size_t linecap = 0;
   ssize_t linelen = 13;
@@ -343,8 +352,14 @@ void editorOpen(char *filename) {
 }
 
 void editorSave() {
-  if (E.filename == NULL)
-    return;
+  if (E.filename == NULL) {
+    E.filename = editorPrompt("Save as: %s");
+    if (E.filename == NULL) {
+      editorSetStatusMessage("Save aborted");
+      return;
+    }
+  }
+
   int len;
   char *buf = editorRowsToString(&len);
 
@@ -524,6 +539,39 @@ void editorSetStatusMessage(const char *fmt, ...) {
 }
 
 // input
+char *editorPrompt(char *prompt) {
+  size_t bufsize = 128;
+  char *buf = malloc(bufsize);
+
+  size_t buflen = 0;
+  buf[0] = '\0';
+  while (1) {
+    editorSetStatusMessage(prompt, buf);
+    editorRefreshScreen();
+    int c = editorReadKey();
+    if (c == BACKSPACE) {
+      if (buflen != 0)
+        buf[buflen--] = '\0';
+    } else if (c == '\x1b') {
+      editorSetStatusMessage("");
+      free(buf);
+      return NULL;
+    } else if (c == '\r') {
+      if (buflen != 0) {
+        editorSetStatusMessage("");
+        return buf;
+      }
+    } else if (!iscntrl(c) && c < 128) {
+      if (buflen == bufsize - 1) {
+        bufsize *= 2;
+        buf = realloc(buf, bufsize);
+      }
+      buf[buflen++] = c;
+      buf[buflen] = '\0';
+    }
+  }
+}
+
 void editorMoveCursor(char key) {
   erow *row = (E.cy >= E.numrows) ? NULL : &E.row[E.cy];
   switch (key) {
@@ -669,6 +717,10 @@ void editorProcessKeypress() {
     }
     break;
   case 'o':
+    if (E.mode == I) {
+      editorInsertChar(c);
+      return;
+    }
     editorInsertNewline('o');
     break;
   case 'j':
