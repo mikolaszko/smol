@@ -167,6 +167,18 @@ int editorRowCxToRx(erow *row, int cx) {
   }
   return rx;
 }
+int editorRowRxToCx(erow *row, int rx) {
+  int cur_rx = 0;
+  int cx;
+  for (cx = 0; cx < row->size; cx++) {
+    if (row->chars[cx] == '\t')
+      cur_rx += (SMOL_TAB_STOP - 1) - (cur_rx % SMOL_TAB_STOP);
+    cur_rx++;
+    if (cur_rx > rx)
+      return cx;
+  }
+  return cx;
+}
 
 void editorUpdateRow(erow *row) {
   int tabs = 0;
@@ -328,7 +340,6 @@ char *editorRowsToString(int *buflen) {
 void editorOpen(char *filename) {
   E.dirty = 0;
   free(E.filename);
-  printf("%s", filename);
   size_t fnlen = strlen(filename) + 1;
   E.filename = malloc(fnlen);
   memcpy(E.filename, filename, fnlen);
@@ -379,6 +390,27 @@ void editorSave() {
 
   free(buf);
   editorSetStatusMessage("Can't save! I/O error: %s", strerror(errno));
+}
+
+// find
+void editorFind() {
+  char *query = editorPrompt("Search: %s (ESC to cancel)");
+  if (query == NULL)
+    return;
+
+  int i;
+  for (i = 0; i < E.numrows; i++) {
+    erow *row = &E.row[i];
+    char *match = strstr(row->render, query);
+    if (match) {
+      E.cy = i;
+      E.cx = editorRowRxToCx(row, match - row->render);
+      E.rowoff = E.numrows;
+      break;
+    }
+  }
+
+  free(query);
 }
 
 // append buffer
@@ -627,6 +659,13 @@ void editorProcessCommand(char c) {
   case '^':
     editorMoveCursor('^');
     return;
+  case 'o':
+    if (E.mode == I) {
+      editorInsertChar(c);
+      return;
+    }
+    editorInsertNewline('o');
+    break;
   case 'G':
     E.cy = E.rowoff;
     times = E.numrows;
@@ -689,6 +728,13 @@ void editorProcessCommand(char c) {
       }
     }
     break;
+  case '/':
+    if (E.mode == I) {
+      editorInsertChar(c);
+      return;
+    }
+    editorFind();
+    break;
   }
 
   if (c != ':') {
@@ -704,7 +750,9 @@ void editorProcessKeypress() {
 
   switch (c) {
   case '\r':
-    editorInsertNewline('\r');
+    if (E.mode == I) {
+      editorInsertNewline('\r');
+    }
     break;
   case '\x1b':
     if (E.mode != N) {
@@ -715,13 +763,6 @@ void editorProcessKeypress() {
     if (E.mode == I) {
       editorDelChar();
     }
-    break;
-  case 'o':
-    if (E.mode == I) {
-      editorInsertChar(c);
-      return;
-    }
-    editorInsertNewline('o');
     break;
   case 'j':
   case 'h':
