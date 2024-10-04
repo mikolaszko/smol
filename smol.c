@@ -440,8 +440,8 @@ void editorFind() {
   int saved_coloff = E.coloff;
   int saved_rowoff = E.rowoff;
 
-  char *query =
-      editorPrompt("Search: %s (Use ESC/Tab/Shift/Enter)", editorFindCallback);
+  char *query = editorPrompt("Search: %s (Use ESC/Tab (Previous)/Enter (Next))",
+                             editorFindCallback);
 
   if (query) {
     free(query);
@@ -633,9 +633,9 @@ char *editorPrompt(char *prompt, void (*callback)(char *, int)) {
     } else if (c == '\r') {
       if (buflen != 0) {
         editorSetStatusMessage("");
-        if (callback)
-          callback(buf, c);
-        return buf;
+        if (!callback) {
+          return buf;
+        }
       }
     } else if (!iscntrl(c) && c < 128) {
       if (buflen == bufsize - 1) {
