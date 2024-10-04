@@ -15,6 +15,7 @@
 #include <termios.h>
 #include <time.h>
 #include <unistd.h>
+
 // defines
 #define SMOL_VERSION "0.0.1"
 #define SMOL_TAB_STOP 2
@@ -69,8 +70,10 @@ enum mode { V = 86, I = 73, N = 78 };
 
 struct editorConfig {
   int rx;
-  int cx, cy;
-  int rowoff, coloff;
+  int cx;
+  int cy;
+  int rowoff;
+  int coloff;
   int screenrows;
   int screencols;
   int numrows;
@@ -221,7 +224,7 @@ void editorUpdateSyntax(erow *row) {
 
     if (scs_len && !in_string) {
       if (!strncmp(&row->render[i], scs, scs_len)) {
-        memset(&row->hl[i], HL_COMMENT, row->rsize - 1);
+        memset(&row->hl[i], HL_COMMENT, row->rsize - i);
         break;
       }
     }
@@ -229,7 +232,7 @@ void editorUpdateSyntax(erow *row) {
     if (E.syntax->flags & HL_HIGHLIGHT_STRINGS) {
       if (in_string) {
         row->hl[i] = HL_STRING;
-        if (c == '\\' && i + 1 < row->size) {
+        if (c == '\\' && i + 1 < row->rsize) {
           row->hl[i + 1] = HL_STRING;
           i += 2;
           continue;
@@ -238,6 +241,7 @@ void editorUpdateSyntax(erow *row) {
           in_string = 0;
         i++;
         prev_sep = 1;
+        continue;
       } else {
         if (c == '"' || c == '\'') {
           in_string = c;
@@ -356,18 +360,13 @@ int editorRowRxToCx(erow *row, int rx) {
 void editorUpdateRow(erow *row) {
   int tabs = 0;
   int j;
-  for (j = 0; j < row->size; j++) {
+  for (j = 0; j < row->size; j++)
     if (row->chars[j] == '\t')
       tabs++;
-  }
 
   free(row->render);
   row->render = malloc(row->size + tabs * (SMOL_TAB_STOP - 1) + 1);
 
-  // NOTE:
-  // this probably can be simplified with memset because thats how optimizer
-  // will do it,
-  // maybe its nicer to read like this?
   int idx = 0;
   for (j = 0; j < row->size; j++) {
     if (row->chars[j] == '\t') {
@@ -386,6 +385,7 @@ void editorUpdateRow(erow *row) {
 void editorInsertRow(int at, char *s, size_t len) {
   if (at < 0 || at > E.numrows)
     return;
+
   E.row = realloc(E.row, sizeof(erow) * (E.numrows + 1));
   memmove(&E.row[at + 1], &E.row[at], sizeof(erow) * (E.numrows - at));
 
@@ -453,6 +453,7 @@ void editorDelChar() {
     return;
   if (E.cx == 0 && E.cy == 0)
     return;
+
   erow *row = &E.row[E.cy];
   if (E.cx > 0) {
     editorRowDelChar(row, E.cx - 1);
@@ -477,7 +478,7 @@ void editorInsertChar(int c) {
 
 void editorInsertNewline(char c) {
   if (E.cx == 0) {
-    editorInsertRow(E.cy + 1, "", 0);
+    editorInsertRow(E.cy, "", 0);
   }
   if (c == '\r') {
     erow *row = &E.row[E.cy];
@@ -526,7 +527,7 @@ void editorOpen(char *filename) {
 
   char *line = NULL;
   size_t linecap = 0;
-  ssize_t linelen = 13;
+  ssize_t linelen;
   while ((linelen = getline(&line, &linecap, fp)) != -1) {
     while (linelen > 0 &&
            (line[linelen - 1] == '\n' || line[linelen - 1] == '\r'))
@@ -1054,7 +1055,6 @@ void editorProcessKeypress() {
       editorInsertChar(c);
     }
     break;
-  //
   default:
     if (E.mode == I) {
       editorInsertChar(c);
