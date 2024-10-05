@@ -1,4 +1,6 @@
 officia excepteur ex fugiat reprehenderit abc
+
+
 t ad nisi Lorem pariatur abc 123 
 uint32_t and 1  wtf is this/////////////////// and it goest complelety nuts
 enim labore culpa sint ad nisi Lorem pariatur 
@@ -192,6 +194,5 @@ Nostrud officia pariatur ut officia.
 Sit irure elit esse ea nulla sunt ex occaecat 
 reprehenderit commodo officia dolor 
 Lorem duis laboris cupidatat officia voluptate. 
-Culpa proident adipisicing id nulla nisi 
-Voluptate laboris sint cupidatat ullamco ut ea consectetur 
+to dopiero teraz jestes w stanie pisac Culpa proident adipisicing id nulla nisi 
 et est culpa et culpa duis.
